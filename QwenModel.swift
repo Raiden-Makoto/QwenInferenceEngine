@@ -14,8 +14,8 @@ class QwenModel{
     // Layer-Agnostic Weights
     let tokenEmbeddings: MTLBuffer
     let finalNormWeight: MTLBuffer
-    let LMHeadPacked: MTLBuffer
-    let LHMHeadScales: MTLBuffer
+    // Change this property:
+    let LMHeadFP16: MTLBuffer
     // Stores the 28 Transformer Blocks
     var layers: [QwenLayer] = []
     // Initializer
@@ -24,8 +24,7 @@ class QwenModel{
         self.loader = WeightLoader(device: device, weightsDir: weightsPath)
         self.tokenEmbeddings = try self.loader.loadBuffer(relativePath: "global/embed_tokens.bin")
         self.finalNormWeight = try self.loader.loadBuffer(relativePath: "global/final_norm.bin")
-        self.LMHeadPacked = try self.loader.loadBuffer(relativePath: "global/embed_tokens_4bit.bin")
-        self.LHMHeadScales = try self.loader.loadBuffer(relativePath: "global/embed_tokens_scales.bin")
+        self.LMHeadFP16 = try self.loader.loadBuffer(relativePath: "global/embed_tokens.bin")
         // Load the 28 Transformer Blocks
         for i in 0..<QwenConfig.numLayers{
             let layer = try QwenLayer(device: device,loader: self.loader, index: i)
