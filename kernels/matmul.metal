@@ -11,7 +11,8 @@ kernel void gemv_q4_0(
     device const half* scales          [[buffer(1)]],
     device const half* input_vector    [[buffer(2)]],
     device half* output_vector         [[buffer(3)]],
-    device const uint* constants       [[buffer(4)]],
+    constant uint* constants           [[buffer(4)]],
+    device const half* bias            [[buffer(5)]], // Optional Bias Buffer
     uint tid [[thread_index_in_threadgroup]],
     uint row [[threadgroup_position_in_grid]])
 {
@@ -26,7 +27,7 @@ kernel void gemv_q4_0(
 
     uint stride = (bytes_per_row + threads - 1) / threads;
     
-    // Accumulate in float to prevent NaN/Inf collapse
+    // FP32 Accumulator to prevent numerical collapse
     float thread_sum = 0.0f;
     
     for (uint i = 0; i < stride; i++) {
@@ -61,6 +62,52 @@ kernel void gemv_q4_0(
         for (uint i = 0; i < simd_groups; i++) {
             final_row_sum += shared_sums[i];
         }
+        
+        // --- FUSED BIAS ADDITION ---
+        if (bias) {
+            final_row_sum += (float)bias[row];
+        }
+        
         output_vector[row] = (half)final_row_sum;
+    }
+}
+
+kernel void gemv_fp16(
+    device const half* weight_matrix   [[buffer(0)]],
+    device const half* input_vector    [[buffer(1)]],
+    device half* output_vector         [[buffer(2)]],
+    constant uint* constants           [[buffer(3)]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint row [[threadgroup_position_in_grid]])
+{
+    uint k = constants[0];
+    uint simd_groups = constants[1];
+    uint threads = constants[2];
+
+    device const half* row_weights = weight_matrix + (row * k);
+    uint stride = (k + threads - 1) / threads;
+    
+    float thread_sum = 0.0f;
+    for (uint i = 0; i < stride; i++) {
+        uint idx = tid + i * threads;
+        if (idx < k) {
+            thread_sum += (float)row_weights[idx] * (float)input_vector[idx];
+        }
+    }
+
+    thread_sum = simd_sum(thread_sum);
+
+    threadgroup float shared_sums[32];
+    uint simd_id = tid / 32;
+    if (tid % 32 == 0) shared_sums[simd_id] = thread_sum;
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (tid == 0) {
+        float final_sum = 0.0f;
+        for (uint i = 0; i < simd_groups; i++) {
+            final_sum += shared_sums[i];
+        }
+        output_vector[row] = (half)final_sum;
     }
 }
